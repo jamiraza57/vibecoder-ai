@@ -1,0 +1,27 @@
+{
+  "name": "vibecoder-ai",
+  "version": "0.1.0",
+  "description": "VibeCoder AI — an extensible autonomous coding agent core (model providers, tool registry, agent loop).",
+  "license": "MIT",
+  "main": "dist/src/index.js",
+  "bin": {
+    "vibecoder": "dist/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
