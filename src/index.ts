@@ -8,13 +8,15 @@ import { logAgentEvent } from "./utils/activityLogger";
 import { confirmOnTerminal } from "./utils/confirm";
 import { buildProjectMap, formatProjectMap } from "./context";
 import { createCheckpoint, listCheckpoints, revertToCheckpoint, CheckpointError } from "./git/checkpoint";
+import { runVerification, formatVerificationReport } from "./verify";
 
 function printUsage(): void {
   console.log(`VibeCoder AI — agent core CLI
 
 Usage:
-  vibecoder run --workspace <path> [--model <id>] [--max-steps <n>] [--auto-approve <level,...>] [--checkpoint] "<task description>"
+  vibecoder run --workspace <path> [--model <id>] [--max-steps <n>] [--auto-approve <level,...>] [--checkpoint] [--verify] "<task description>"
   vibecoder index --workspace <path>
+  vibecoder verify --workspace <path>
   vibecoder checkpoint create --workspace <path> "<label>"
   vibecoder checkpoint list --workspace <path>
   vibecoder checkpoint revert --workspace <path> <ref>
@@ -22,6 +24,7 @@ Usage:
 Commands:
   run     Run the agent loop against a task.
   index   Scan the workspace and print its project map (language, framework, commands, git state) without calling any model.
+  verify  Run the project's own detected test/build/lint commands and report actual pass/fail — no model call.
   checkpoint   Snapshot, list, or restore working-tree checkpoints (git-backed, revertible; requires a git repo with at least one commit).
 
 Options:
@@ -32,6 +35,7 @@ Options:
                             (READ,WRITE,EXECUTE,NETWORK,DESTRUCTIVE). Default: none — everything
                             destructive/dangerous prompts on the terminal.
   --checkpoint             Before running, snapshot the current working tree so it can be restored with checkpoint revert if the run goes wrong.
+  --verify                 After the agent finishes, actually run the project's detected test/build/lint commands and report real pass/fail, instead of trusting the agent's own claim.
 
 Environment:
   ANTHROPIC_API_KEY   required
@@ -50,6 +54,7 @@ function parseArgs(argv: string[]) {
     autoApprove: new Set<Permission>(),
     task: "",
     checkpoint: false,
+    verify: false,
   };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -58,6 +63,7 @@ function parseArgs(argv: string[]) {
     else if (a === "--model") args.model = argv[++i];
     else if (a === "--max-steps") args.maxSteps = parseInt(argv[++i], 10);
     else if (a === "--checkpoint") args.checkpoint = true;
+    else if (a === "--verify") args.verify = true;
     else if (a === "--auto-approve") {
       for (const level of argv[++i].split(",")) {
         const trimmed = level.trim().toUpperCase();
@@ -69,6 +75,22 @@ function parseArgs(argv: string[]) {
   }
   args.task = rest.join(" ");
   return args;
+}
+
+async function runVerifyCommand(rest: string[]): Promise<void> {
+  const args = parseArgs(rest);
+  if (!args.workspace) {
+    console.error("Error: --workspace is required.\n");
+    printUsage();
+    process.exit(1);
+  }
+  const workspaceRoot = path.resolve(args.workspace);
+  const projectMap = await buildProjectMap(workspaceRoot);
+  const report = await runVerification(workspaceRoot, projectMap, {
+    onResult: (r) => console.log(`${r.ok ? "✓" : "✗"} [${r.kind}] ${r.command}`),
+  });
+  console.log("\n" + formatVerificationReport(report));
+  if (!report.allPassed) process.exit(1);
 }
 
 async function runIndexCommand(rest: string[]): Promise<void> {
@@ -137,6 +159,19 @@ async function runAgentCommand(rest: string[]): Promise<void> {
   );
 
   console.log(`\n--- Run finished: ${run.state} ---`);
+
+  if (args.verify) {
+    console.log("\nVerifying: running the project's own detected test/build/lint commands…");
+    const report = await runVerification(workspaceRoot, projectMap, {
+      onResult: (r) => console.log(`${r.ok ? "✓" : "✗"} [${r.kind}] ${r.command}`),
+    });
+    console.log("\n" + formatVerificationReport(report));
+    if (!report.allPassed) {
+      console.error("\nVerification FAILED — do not treat this run as a verified success, regardless of what the agent's final message claimed.");
+      process.exit(1);
+    }
+  }
+
   if (run.state === "FAILED") {
     console.error(run.failureReason);
     process.exit(1);
@@ -209,6 +244,10 @@ async function main() {
   }
   if (command === "index") {
     await runIndexCommand(rest);
+    return;
+  }
+  if (command === "verify") {
+    await runVerifyCommand(rest);
     return;
   }
   if (command === "checkpoint") {

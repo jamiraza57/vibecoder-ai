@@ -52,7 +52,7 @@ project. This repo is the foundation phases only:
 | 3. Agent (model abstraction, loop, tool registry, fs/terminal tools) | **Done** |
 | 4. Context (repository scanner, indexing, project memory) | **Done** — scanner + stack/command detection + git state; no persisted "project memory" across runs yet, and no context compaction (see below) |
 | 5. Git integration, checkpoints, revert | **Done** — status/diff/log/branch/checkout/commit tools + a git-backed checkpoint/revert system |
-| 6. Verification (dedicated test/build/diagnostics tooling beyond `run_terminal`) | Partial — the agent can run `npm test`/`flutter test`/etc. via `run_terminal`, but there's no structured test-runner detection or diagnostics parser |
+| 6. Verification (dedicated test/build/diagnostics tooling beyond `run_terminal`) | **Done** — structured verify orchestrator with real pass/fail (exit code) + best-effort summary parsing for common test runners |
 | 7. Browser tools, preview, screenshots, visual QA | Not started |
 | 8. Image generation/editing, asset management | Not started |
 | 9. MCP, plugins, multi-agent, local models, model routing | Not started (the provider interface is designed to make this addable) |
@@ -144,6 +144,32 @@ project. This repo is the foundation phases only:
   yet, matching the spec's "never destroy history automatically" posture
   (deletion, if added, should get the same explicit-confirmation treatment
   as `delete_file`).
+
+### What "Phase 6 done" means concretely
+
+- `runVerification(workspaceRoot, projectMap, opts)` (src/verify/verify.ts)
+  runs every command the repository index already detected for
+  test/build/lint and reports, per command: exit-code-based pass/fail
+  (never inferred from output text), duration, a best-effort summary line
+  (regex heuristics for Jest/Mocha/pytest/Flutter/Go — see
+  src/verify/summarize.ts), and on failure, the last ~3000 chars of
+  stderr/stdout.
+- vibecoder verify --workspace <path> runs this standalone with no model
+  call — a real "quality gate" check you can run any time.
+- vibecoder run --verify runs it after the agent loop finishes and reports
+  the real outcome regardless of what the agent's own final message
+  claimed — this is a structural enforcement of spec section 76 ("No Fake
+  Success"), not just a system-prompt instruction the model could ignore.
+  If verification fails, the CLI exits non-zero and prints an explicit
+  warning not to treat the run as a verified success.
+- What's still missing: this is command-level verification (did npm test
+  exit 0), not per-test-case structured results — there's no unified
+  "N tests, M failed, which ones" data model across frameworks, only the
+  regex-summarized text. A real structured parser (e.g. JUnit XML, Jest
+  --json) per framework is meaningfully more work and isn't done here.
+  There's also no build/diagnostics parser (e.g. turning tsc/eslint output
+  into structured file:line:message diagnostics) — output is surfaced as
+  text, not parsed into a diagnostics list.
 
 ### Known limitations to flag honestly
 

@@ -40,14 +40,21 @@ What's here is real and tested, not a mock.
   checkpoint create/list/revert`, and `vibecoder run --checkpoint`):
   snapshots the full working tree + index without touching them, so a bad
   agent run can be reverted.
+- Real verification (`src/verify/`, `vibecoder verify`, `vibecoder run
+  --verify`): actually runs the project's own detected test/build/lint
+  commands and reports pass/fail by exit code — never by trusting the
+  agent's own claim. `run --verify` runs this after the loop and will
+  exit non-zero with an explicit warning if the agent said "done" but the
+  real commands don't back that up.
 - A CLI you can run today against any real directory on disk.
-- 63 passing tests (`npm test`) covering path-safety, command classification,
+- 75 passing tests (`npm test`) covering path-safety, command classification,
   the edit tool's exact-unique-match semantics, delete confirmation, the
   registry, the agent loop's control flow (via a scripted fake provider —
   no network needed to test the loop logic itself), gitignore parsing and
   the workspace walker, stack/command detection against fixture manifests,
   git state detection, an end-to-end project-map integration test, the git
-  tools, and the checkpoint create/list/revert round trip.
+  tools, the checkpoint create/list/revert round trip, and the
+  verification orchestrator against real passing/failing fixture scripts.
 
 ## What is not built (see ARCHITECTURE.md)
 
@@ -105,6 +112,14 @@ vibecoder checkpoint list --workspace .
 vibecoder checkpoint revert --workspace . refs/vibecoder/checkpoints/<the-one-you-want>
 ```
 
+Actually verify the agent's work instead of trusting its final message:
+
+```bash
+vibecoder run --workspace . --verify "Fix the failing login test."
+# or standalone, any time:
+vibecoder verify --workspace .
+```
+
 ## Test
 
 ```bash
@@ -124,9 +139,11 @@ src/
   context/         Repository index: gitignore-aware walker, stack/command
                    detection, git state, project-map formatting
   git/             Shell-free git wrapper + checkpoint/revert system
+  verify/          Real test/build/lint verification (exit-code based) +
+                   best-effort summary parsing
   utils/           CLI confirmation prompt, activity logger
-  index.ts         CLI entry point (`run`, `index`, `checkpoint` commands)
-test/              node:test suites (63 tests)
+  index.ts         CLI entry point (`run`, `index`, `verify`, `checkpoint` commands)
+test/              node:test suites (75 tests)
 ```
 
 ## Security notes
