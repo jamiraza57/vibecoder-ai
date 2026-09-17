@@ -51,7 +51,7 @@ project. This repo is the foundation phases only:
 | 2. Editor (file explorer, tabs, terminal UI) | Not started — no desktop UI exists |
 | 3. Agent (model abstraction, loop, tool registry, fs/terminal tools) | **Done** |
 | 4. Context (repository scanner, indexing, project memory) | **Done** — scanner + stack/command detection + git state; no persisted "project memory" across runs yet, and no context compaction (see below) |
-| 5. Git integration, checkpoints, revert | Not started |
+| 5. Git integration, checkpoints, revert | **Done** — status/diff/log/branch/checkout/commit tools + a git-backed checkpoint/revert system |
 | 6. Verification (dedicated test/build/diagnostics tooling beyond `run_terminal`) | Partial — the agent can run `npm test`/`flutter test`/etc. via `run_terminal`, but there's no structured test-runner detection or diagnostics parser |
 | 7. Browser tools, preview, screenshots, visual QA | Not started |
 | 8. Image generation/editing, asset management | Not started |
@@ -106,6 +106,44 @@ project. This repo is the foundation phases only:
   task, and no context compaction (section 15) — a very long run still
   accumulates full message history for its duration. Both are real
   follow-on work, not implemented here.
+
+### What "Phase 5 done" means concretely
+
+- Six real git tools, all built on a shell-free `execGit` wrapper (argv
+  arrays via `spawnSync`, no string interpolation — unlike `run_terminal`,
+  there's no command-injection surface here at all): `git_status`,
+  `git_diff`, `git_log`, `git_branch` (list only), `git_checkout`,
+  `git_commit`.
+- `git_checkout` enforces the spec's "never destroy existing uncommitted
+  work" rule directly: it runs `git status --porcelain` first and refuses
+  to switch branches at all if the tree is dirty, rather than trying to be
+  clever about what's safe to carry over.
+- `git_commit` never amends or force-anything; it stages either specific
+  paths or everything (`git add -A`) and fails cleanly (not silently) if
+  there's nothing staged after that.
+- Checkpoint system (`src/git/checkpoint.ts`): `createCheckpoint` snapshots
+  the full working tree + index (including untracked files) as a git commit
+  object via `git stash create`, then points a ref under
+  `refs/vibecoder/checkpoints/<timestamp>-<label>` at it with `update-ref` —
+  deliberately never `git stash push`, so creating a checkpoint cannot
+  itself alter the working tree, the index, or HEAD. `revertToCheckpoint`
+  applies it back with `git stash apply` (merges rather than force-resets,
+  so it can conflict if things have moved on further — surfaced as a failed
+  result, not swallowed). `vibecoder checkpoint create/list/revert` exposes
+  this from the CLI, and `vibecoder run --checkpoint` snapshots
+  automatically before a run starts.
+- These are not exposed to the model as agent tools in this phase —
+  checkpointing is operator-controlled (via the CLI flag/commands) rather
+  than something the agent decides to do mid-task. That's a deliberate scope
+  cut, not an oversight: giving the agent its own checkpoint/revert tool
+  calls is reasonable future work but adds a decision surface (when should
+  the agent checkpoint? revert on its own initiative?) that's safer to
+  design deliberately than to add as a rushed extra tool here.
+- `git_branch` is list-only; branch creation happens through
+  `git_checkout`'s `create` flag and there is no branch-deletion tool at all
+  yet, matching the spec's "never destroy history automatically" posture
+  (deletion, if added, should get the same explicit-confirmation treatment
+  as `delete_file`).
 
 ### Known limitations to flag honestly
 

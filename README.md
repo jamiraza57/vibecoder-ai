@@ -32,13 +32,22 @@ What's here is real and tested, not a mock.
   git state. `vibecoder run` feeds this to the agent as part of its system
   prompt automatically; `vibecoder index` prints it standalone with no
   model call.
+- Six real git tools (`git_status`, `git_diff`, `git_log`, `git_branch`,
+  `git_checkout`, `git_commit`) built on a shell-free argv-array git
+  wrapper — no command-injection surface. `git_checkout` refuses to switch
+  branches over uncommitted changes rather than risking your work.
+- A git-backed checkpoint system (`src/git/checkpoint.ts`, `vibecoder
+  checkpoint create/list/revert`, and `vibecoder run --checkpoint`):
+  snapshots the full working tree + index without touching them, so a bad
+  agent run can be reverted.
 - A CLI you can run today against any real directory on disk.
-- 45 passing tests (`npm test`) covering path-safety, command classification,
+- 63 passing tests (`npm test`) covering path-safety, command classification,
   the edit tool's exact-unique-match semantics, delete confirmation, the
   registry, the agent loop's control flow (via a scripted fake provider —
   no network needed to test the loop logic itself), gitignore parsing and
   the workspace walker, stack/command detection against fixture manifests,
-  git state detection, and an end-to-end project-map integration test.
+  git state detection, an end-to-end project-map integration test, the git
+  tools, and the checkpoint create/list/revert round trip.
 
 ## What is not built (see ARCHITECTURE.md)
 
@@ -87,6 +96,15 @@ To pre-approve a permission level for the whole run (use with care):
 vibecoder run --workspace . --auto-approve EXECUTE "Run the test suite and report results."
 ```
 
+Snapshot the working tree before a risky run, so it can be undone:
+
+```bash
+vibecoder run --workspace . --checkpoint "Refactor the auth module."
+# ...if it goes wrong:
+vibecoder checkpoint list --workspace .
+vibecoder checkpoint revert --workspace . refs/vibecoder/checkpoints/<the-one-you-want>
+```
+
 ## Test
 
 ```bash
@@ -101,13 +119,14 @@ compiled output — no test framework dependency needed.
 ```
 src/
   providers/       ModelProvider interface + AnthropicProvider
-  tools/           Tool interface, registry, path safety, fs tools, terminal tool
+  tools/           Tool interface, registry, path safety, fs/terminal/git tools
   agent/           AgentLoop + run/step/event types
   context/         Repository index: gitignore-aware walker, stack/command
                    detection, git state, project-map formatting
+  git/             Shell-free git wrapper + checkpoint/revert system
   utils/           CLI confirmation prompt, activity logger
-  index.ts         CLI entry point (`run` and `index` commands)
-test/              node:test suites (45 tests)
+  index.ts         CLI entry point (`run`, `index`, `checkpoint` commands)
+test/              node:test suites (63 tests)
 ```
 
 ## Security notes

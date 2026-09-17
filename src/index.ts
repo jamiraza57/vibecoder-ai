@@ -7,17 +7,22 @@ import { AgentLoop } from "./agent/AgentLoop";
 import { logAgentEvent } from "./utils/activityLogger";
 import { confirmOnTerminal } from "./utils/confirm";
 import { buildProjectMap, formatProjectMap } from "./context";
+import { createCheckpoint, listCheckpoints, revertToCheckpoint, CheckpointError } from "./git/checkpoint";
 
 function printUsage(): void {
   console.log(`VibeCoder AI — agent core CLI
 
 Usage:
-  vibecoder run --workspace <path> [--model <id>] [--max-steps <n>] [--auto-approve <level,...>] "<task description>"
+  vibecoder run --workspace <path> [--model <id>] [--max-steps <n>] [--auto-approve <level,...>] [--checkpoint] "<task description>"
   vibecoder index --workspace <path>
+  vibecoder checkpoint create --workspace <path> "<label>"
+  vibecoder checkpoint list --workspace <path>
+  vibecoder checkpoint revert --workspace <path> <ref>
 
 Commands:
   run     Run the agent loop against a task.
   index   Scan the workspace and print its project map (language, framework, commands, git state) without calling any model.
+  checkpoint   Snapshot, list, or restore working-tree checkpoints (git-backed, revertible; requires a git repo with at least one commit).
 
 Options:
   --workspace <path>       Directory the agent may read/write/run commands in. Required.
@@ -26,6 +31,7 @@ Options:
   --auto-approve <levels>  Comma-separated permission levels to skip confirmation for
                             (READ,WRITE,EXECUTE,NETWORK,DESTRUCTIVE). Default: none — everything
                             destructive/dangerous prompts on the terminal.
+  --checkpoint             Before running, snapshot the current working tree so it can be restored with checkpoint revert if the run goes wrong.
 
 Environment:
   ANTHROPIC_API_KEY   required
@@ -37,13 +43,21 @@ Example:
 }
 
 function parseArgs(argv: string[]) {
-  const args = { workspace: "", model: process.env.ANTHROPIC_MODEL ?? "", maxSteps: 50, autoApprove: new Set<Permission>(), task: "" };
+  const args = {
+    workspace: "",
+    model: process.env.ANTHROPIC_MODEL ?? "",
+    maxSteps: 50,
+    autoApprove: new Set<Permission>(),
+    task: "",
+    checkpoint: false,
+  };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--workspace") args.workspace = argv[++i];
     else if (a === "--model") args.model = argv[++i];
     else if (a === "--max-steps") args.maxSteps = parseInt(argv[++i], 10);
+    else if (a === "--checkpoint") args.checkpoint = true;
     else if (a === "--auto-approve") {
       for (const level of argv[++i].split(",")) {
         const trimmed = level.trim().toUpperCase();
@@ -102,6 +116,20 @@ async function runAgentCommand(rest: string[]): Promise<void> {
   const projectContext = formatProjectMap(projectMap);
   console.log(projectContext + "\n");
 
+  if (args.checkpoint) {
+    try {
+      const checkpoint = createCheckpoint(workspaceRoot, "before-run");
+      if (checkpoint) {
+        console.log(`Checkpoint created: ${checkpoint.ref}`);
+        console.log(`Revert with: vibecoder checkpoint revert --workspace ${args.workspace} ${checkpoint.ref}\n`);
+      } else {
+        console.log("Working tree is clean — no checkpoint needed.\n");
+      }
+    } catch (err) {
+      console.error(`Warning: could not create checkpoint (${(err as Error).message}). Continuing without one.\n`);
+    }
+  }
+
   const run = await loop.run(
     args.task,
     { maxSteps: args.maxSteps, maxRepeatedIdenticalCalls: 3, projectContext, onEvent: logAgentEvent },
@@ -115,6 +143,63 @@ async function runAgentCommand(rest: string[]): Promise<void> {
   }
 }
 
+async function runCheckpointCommand(rest: string[]): Promise<void> {
+  const [subcommand, ...subRest] = rest;
+  const args = parseArgs(subRest.filter((a) => a !== subcommand));
+
+  if (!args.workspace) {
+    console.error("Error: --workspace is required.\n");
+    printUsage();
+    process.exit(1);
+  }
+  const workspaceRoot = path.resolve(args.workspace);
+
+  try {
+    if (subcommand === "create") {
+      const label = args.task || "manual";
+      const checkpoint = createCheckpoint(workspaceRoot, label);
+      if (!checkpoint) {
+        console.log("Working tree is clean — no checkpoint needed.");
+        return;
+      }
+      console.log(`Created ${checkpoint.ref}`);
+      console.log(`Revert later with: vibecoder checkpoint revert --workspace ${args.workspace} ${checkpoint.ref}`);
+      return;
+    }
+    if (subcommand === "list") {
+      const checkpoints = listCheckpoints(workspaceRoot);
+      if (!checkpoints.length) {
+        console.log("No checkpoints found.");
+        return;
+      }
+      for (const cp of checkpoints) {
+        console.log(`${cp.ref}\n  created: ${cp.createdAt}\n  label:   ${cp.label}\n`);
+      }
+      return;
+    }
+    if (subcommand === "revert") {
+      const ref = args.task.trim();
+      if (!ref) {
+        console.error("Error: a checkpoint ref is required, e.g. refs/vibecoder/checkpoints/1234-my-label");
+        process.exit(1);
+      }
+      const result = revertToCheckpoint(workspaceRoot, ref);
+      console.log(result.message);
+      if (!result.ok) process.exit(1);
+      return;
+    }
+    console.error(`Unknown checkpoint subcommand "${subcommand}". Use create, list, or revert.\n`);
+    printUsage();
+    process.exit(1);
+  } catch (err) {
+    if (err instanceof CheckpointError) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+}
+
 async function main() {
   const [, , command, ...rest] = process.argv;
 
@@ -124,6 +209,10 @@ async function main() {
   }
   if (command === "index") {
     await runIndexCommand(rest);
+    return;
+  }
+  if (command === "checkpoint") {
+    await runCheckpointCommand(rest);
     return;
   }
 
