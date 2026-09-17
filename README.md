@@ -25,11 +25,20 @@ What's here is real and tested, not a mock.
 - A real agent loop (`src/agent/AgentLoop.ts`): plan → tool call → observe →
   repeat, with loop protection (stops if the same tool+arguments repeat too
   many times) and a max-steps ceiling — it fails loudly instead of hanging.
+- A repository index (`src/context/`): walks the workspace respecting
+  `.gitignore`, detects language/framework/package manager from real
+  manifest parsing (Node, Flutter/Dart, Python, PHP/Laravel), finds known
+  test/build/lint commands, entry points, test directories, and read-only
+  git state. `vibecoder run` feeds this to the agent as part of its system
+  prompt automatically; `vibecoder index` prints it standalone with no
+  model call.
 - A CLI you can run today against any real directory on disk.
-- 25 passing tests (`npm test`) covering path-safety, command classification,
+- 45 passing tests (`npm test`) covering path-safety, command classification,
   the edit tool's exact-unique-match semantics, delete confirmation, the
-  registry, and the agent loop's control flow (via a scripted fake provider —
-  no network needed to test the loop logic itself).
+  registry, the agent loop's control flow (via a scripted fake provider —
+  no network needed to test the loop logic itself), gitignore parsing and
+  the workspace walker, stack/command detection against fixture manifests,
+  git state detection, and an end-to-end project-map integration test.
 
 ## What is not built (see ARCHITECTURE.md)
 
@@ -50,6 +59,14 @@ npm run build
 ```
 
 ## Run it
+
+```bash
+node dist/src/index.js index --workspace ./some-project
+```
+
+Prints the project map (language, framework, package manager, known
+commands, git state) with no model call — useful on its own to sanity-check
+detection, and it's exactly what gets prepended to the agent's context below.
 
 ```bash
 node dist/src/index.js run --workspace ./some-project "Explain what this project does."
@@ -86,9 +103,11 @@ src/
   providers/       ModelProvider interface + AnthropicProvider
   tools/           Tool interface, registry, path safety, fs tools, terminal tool
   agent/           AgentLoop + run/step/event types
+  context/         Repository index: gitignore-aware walker, stack/command
+                   detection, git state, project-map formatting
   utils/           CLI confirmation prompt, activity logger
-  index.ts         CLI entry point
-test/              node:test suites (25 tests)
+  index.ts         CLI entry point (`run` and `index` commands)
+test/              node:test suites (45 tests)
 ```
 
 ## Security notes

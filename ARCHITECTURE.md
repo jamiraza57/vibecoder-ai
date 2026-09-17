@@ -50,7 +50,7 @@ project. This repo is the foundation phases only:
 | 1. Foundation / project setup | **Done** — this repo |
 | 2. Editor (file explorer, tabs, terminal UI) | Not started — no desktop UI exists |
 | 3. Agent (model abstraction, loop, tool registry, fs/terminal tools) | **Done** |
-| 4. Context (repository scanner, indexing, project memory) | Not started |
+| 4. Context (repository scanner, indexing, project memory) | **Done** — scanner + stack/command detection + git state; no persisted "project memory" across runs yet, and no context compaction (see below) |
 | 5. Git integration, checkpoints, revert | Not started |
 | 6. Verification (dedicated test/build/diagnostics tooling beyond `run_terminal`) | Partial — the agent can run `npm test`/`flutter test`/etc. via `run_terminal`, but there's no structured test-runner detection or diagnostics parser |
 | 7. Browser tools, preview, screenshots, visual QA | Not started |
@@ -77,6 +77,35 @@ project. This repo is the foundation phases only:
   settings between CLI invocations yet, since there's no settings store
   (Phase 1 also doesn't include the SQLite-backed storage layer the spec
   describes in section 60).
+
+### What "Phase 4 done" means concretely
+
+- `buildProjectMap(workspaceRoot)` (src/context/projectIndex.ts) walks the
+  workspace respecting a real `.gitignore` (common-subset parser — plain
+  names, `*` globs, trailing-slash dir-only entries, leading-slash anchors;
+  no negation or `**`) plus always-ignored noise dirs (`node_modules`,
+  `.git`, `dist`, build output, etc.), and returns language counts by file
+  extension, detected package manager(s) and framework(s) from real manifest
+  parsing (package.json, pubspec.yaml, requirements.txt/pyproject.toml,
+  composer.json), known test/build/lint commands with their source, entry
+  points, test directories, the largest top-level directories, and read-only
+  git state (branch, dirty flag + changed-file count, last commit subject).
+- `vibecoder index --workspace <path>` prints this without calling any
+  model — useful on its own, and it's what `vibecoder run` calls first to
+  prepend a project summary to the agent's system prompt (see
+  `AgentLoop`'s `projectContext` option), so the agent starts each run
+  already knowing the stack and test/build commands instead of discovering
+  them via tool calls every time.
+- Framework/dependency detection is manifest-based pattern matching (specific
+  dependency names → specific frameworks), not a general-purpose static
+  analyzer — it will miss unusual or nonstandard project layouts, and it
+  only recognizes the ecosystems explicitly coded in `src/context/detect.ts`
+  (Node/npm-yarn-pnpm, Flutter/Dart, Python/pip, PHP/Composer).
+- What's still missing from the original "Context Engine" spec (section 14):
+  no symbol/import graph, no per-file relevance ranking against the current
+  task, and no context compaction (section 15) — a very long run still
+  accumulates full message history for its duration. Both are real
+  follow-on work, not implemented here.
 
 ### Known limitations to flag honestly
 
