@@ -57,7 +57,7 @@ export class AgentLoop {
       let response;
       try {
         response = await this.provider.chat({
-          system: SYSTEM_PROMPT,
+          system: options.projectContext ? `${SYSTEM_PROMPT}\n\n${options.projectContext}` : SYSTEM_PROMPT,
           messages,
           tools: this.registry.toAnthropicToolDefs(),
         });

@@ -52,6 +52,8 @@ export interface AgentLoopOptions {
   maxSteps: number;
   /** Consecutive identical (tool + input) calls before loop protection kicks in. */
   maxRepeatedIdenticalCalls: number;
+  /** A pre-computed repository summary (see src/context) to prepend to the system prompt, so the agent doesn't have to rediscover basic project facts via tool calls every run. */
+  projectContext?: string;
   onEvent?: (event: AgentEvent) => void;
 }
 

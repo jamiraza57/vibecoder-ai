@@ -6,12 +6,18 @@ import { buildDefaultRegistry, Permission } from "./tools";
 import { AgentLoop } from "./agent/AgentLoop";
 import { logAgentEvent } from "./utils/activityLogger";
 import { confirmOnTerminal } from "./utils/confirm";
+import { buildProjectMap, formatProjectMap } from "./context";
 
 function printUsage(): void {
   console.log(`VibeCoder AI — agent core CLI
 
 Usage:
   vibecoder run --workspace <path> [--model <id>] [--max-steps <n>] [--auto-approve <level,...>] "<task description>"
+  vibecoder index --workspace <path>
+
+Commands:
+  run     Run the agent loop against a task.
+  index   Scan the workspace and print its project map (language, framework, commands, git state) without calling any model.
 
 Options:
   --workspace <path>       Directory the agent may read/write/run commands in. Required.
@@ -51,14 +57,19 @@ function parseArgs(argv: string[]) {
   return args;
 }
 
-async function main() {
-  const [, , command, ...rest] = process.argv;
-
-  if (command !== "run") {
+async function runIndexCommand(rest: string[]): Promise<void> {
+  const args = parseArgs(rest);
+  if (!args.workspace) {
+    console.error("Error: --workspace is required.\n");
     printUsage();
-    process.exit(command ? 1 : 0);
+    process.exit(1);
   }
+  const workspaceRoot = path.resolve(args.workspace);
+  const map = await buildProjectMap(workspaceRoot);
+  console.log(formatProjectMap(map));
+}
 
+async function runAgentCommand(rest: string[]): Promise<void> {
   const args = parseArgs(rest);
 
   if (!args.workspace || !args.task) {
@@ -86,9 +97,14 @@ async function main() {
   console.log(`Model:     ${args.model}`);
   console.log(`Task:      ${args.task}\n`);
 
+  console.log("Indexing workspace…");
+  const projectMap = await buildProjectMap(workspaceRoot);
+  const projectContext = formatProjectMap(projectMap);
+  console.log(projectContext + "\n");
+
   const run = await loop.run(
     args.task,
-    { maxSteps: args.maxSteps, maxRepeatedIdenticalCalls: 3, onEvent: logAgentEvent },
+    { maxSteps: args.maxSteps, maxRepeatedIdenticalCalls: 3, projectContext, onEvent: logAgentEvent },
     { confirm: confirmOnTerminal, autoApprove: args.autoApprove }
   );
 
@@ -97,6 +113,22 @@ async function main() {
     console.error(run.failureReason);
     process.exit(1);
   }
+}
+
+async function main() {
+  const [, , command, ...rest] = process.argv;
+
+  if (command === "run") {
+    await runAgentCommand(rest);
+    return;
+  }
+  if (command === "index") {
+    await runIndexCommand(rest);
+    return;
+  }
+
+  printUsage();
+  process.exit(command ? 1 : 0);
 }
 
 main().catch((err) => {
